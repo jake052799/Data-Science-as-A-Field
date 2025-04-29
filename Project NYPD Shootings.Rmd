@@ -1,0 +1,151 @@
+---
+title: 'Project: NYPD Shootings'
+date: "2025-04-22"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1: Import the Data
+
+Add Lubridate and tidyverse as a library to the R markdown file.
+
+```{r nypd_shooting_data, echo = FALSE}
+## Get current Data for NYPD Shooting Incidents
+library(tidyverse)
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+Let's read in the data and see what we have
+
+```{r import_data, message = FALSE}
+nypd_shootings <- read_csv(url_in)
+```
+
+## Step 2: Tidy and Transform the Data
+
+We are going to tidy up the data by removing the following fields.
+
+- X_COORD_CD
+- Y_COORD_CD
+- Latitude
+- Longitude
+- Lon_Lat
+
+```{r tidy_nypd_shootings}
+## Remove Unnecessary Data and Change Date to date type:
+nypd_shootings <- nypd_shootings %>%
+  select(-c(X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"))
+nypd_shootings
+```
+
+Looking at our data we see we changed the OCCUR_DATE value to date type.
+
+Now we need to handle missing data we need to clean up the values that contain a value of (null) or unknown to NA.
+
+```{r remove_null_unknown_values}
+## Replace Null and Unknown Values with NA
+nypd_shootings <- nypd_shootings %>%
+  mutate(across(where(is.character), ~na_if(., "(null)"))) %>%
+  mutate(across(where(is.character), ~na_if(., "UNKNOWN")))
+nypd_shootings
+```
+
+To handle missing data we are going to remove data if it is missing in PERP_AGE_GROUP, PERP_SEX, PERM_RACE.
+
+All other missing data in the new data set will be "Other". This occurs in the LOCATION_DESC column.
+
+```{r remove_na_nypd_shootings}
+nypd_shootings_cleaned <- nypd_shootings %>%
+  filter(!is.na(PERP_AGE_GROUP) & !is.na(PERP_SEX) & !is.na(PERP_RACE)) %>%
+  mutate(LOCATION_DESC = replace_na(LOCATION_DESC, "other")) %>%
+  mutate(LOC_CLASSFCTN_DESC = replace_na(LOC_CLASSFCTN_DESC, "other")) %>%
+  mutate(LOC_OF_OCCUR_DESC = replace_na(LOC_OF_OCCUR_DESC, "other")) %>%
+  rename(DISTRICT = BORO)
+nypd_shootings_cleaned
+summary(nypd_shootings_cleaned)
+```
+
+## Step 3 Let's visualize this Data!
+
+We want to look at the sum of shootings by District, Perp Race, and Perp Sex.
+
+```{r nypd_district_shootings, echo = FALSE}
+nypd_shootings_cleaned_district <- nypd_shootings_cleaned %>%
+  ggplot(aes(x = DISTRICT, fill = DISTRICT)) +
+  geom_bar() +
+  theme_minimal()
+plot(nypd_shootings_cleaned_district)
+```
+
+```{r nypd_perp_shootings_race, echo = FALSE}
+nypd_shootings_cleaned_race <- nypd_shootings_cleaned %>%
+  ggplot(aes(x = PERP_RACE, fill = PERP_RACE)) +
+  geom_bar() +
+  theme_minimal()
+plot(nypd_shootings_cleaned_race)
+```
+
+```{r nypd_perp_shootings_sex, echo = FALSE}
+nypd_shootings_cleaned_sex <- nypd_shootings_cleaned %>%
+  ggplot(aes(x = PERP_SEX, fill = PERP_SEX)) +
+  geom_bar() +
+  theme_minimal()
+plot(nypd_shootings_cleaned_sex)
+```
+
+Let's check what time of day will be more likely for a shooting to happen.
+
+```{r nypd_count_cases}
+nypd_shootings_by_hour <- nypd_shootings_cleaned %>%
+  mutate(hour = hour(OCCUR_TIME)) %>%
+  count(hour)
+```
+
+```{r nypd_cases_time, echo = FALSE}
+nypd_shootings_time_plot <- nypd_shootings_by_hour %>%
+  ggplot(aes(x = hour, y = n)) +
+  geom_line(color = "red", linewidth = 1) +
+  labs(title = "Shooting by Time of Day", x = "Time of Day", y = "Count") +
+  theme_minimal()
+plot(nypd_shootings_time_plot)
+```
+
+```{r nypd_shootings_murder_model}
+## Create a Model with variables OCCUR_TIME, DISTRICT, PERP_RACE, and PERP_SEX for Predicting a Murder:
+mod <- glm(STATISTICAL_MURDER_FLAG ~ OCCUR_TIME + DISTRICT + PERP_RACE + PERP_SEX, data = nypd_shootings_cleaned, family = "binomial")
+summary(mod)
+```
+Looking at the summary we see that a murder was more likely to occur in Brooklyn and Manhattan Districts than any other District.
+Also, if the perpetrator was Male there is a higher likelihood it was a murder.
+Race does not seem to be a factor for committing more murders in New York
+Finally, we see that all Districts were significant in predicting a murder no mater where it occurs in New York.
+
+## Step 4 Conclusion Bias Identification
+
+After visualizing our data some questions come up.
+
+Why are men extremely more likely to commit a shooting?
+Why, if your race is Black, are you more likely to get reported for a shooting?
+This question could lead to different districts having different race populations.
+With the District Bar Graph we see that the Bronx and Brooklyn area of New York are where the majority of the shootings being reported.
+This could also lead to questions like, what are the poverty levels in these Districts?
+This could be investigated by adding a standard of living variable to each of New York's districts.
+A lot questions come up when we are visualizing and analyzing the data even before we run a model on it.
+
+Also, we need to consider the question of where the source of this data is coming from?
+We see that the source of the data comes from the NYPD.
+Are there inherent bias toward people of color from the NYPD?
+Does the NYPD patrol certain districts of New York unfairly?
+Are Males seen as more of a threat than Females to police?
+
+For further analysis I can try to add a standard of living variable by district to mitigate some bias in the analysis.
+I could also add a single motherhood percentage to each District.
+This can lead to a different model being that standard of living or that single motherhood rate are actually better predictors in this model.
+This could lead to a solution/conclusion that if we raise the standard of living in higher shooting Districts or decrease the Single Motherhood Percentage we actually reduce the amount of shootings and murders in said District. In conclusion, more data could lead to a better solution and mitigate this disparity in society.
+
+Thank You!
